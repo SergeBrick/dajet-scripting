@@ -3590,7 +3590,6 @@ namespace DaJet.Scripting
         private SyntaxNode consume_stream_statement(in ConsumeStatement consume)
         {
             consume.Target = Previous().Value;
-            consume.IsStream = true; // always is stream !?
 
             Skip(Token.Comment);
 
@@ -3625,6 +3624,11 @@ namespace DaJet.Scripting
             else if (!(declare.Type.IsArray || declare.Type.IsObject))
             {
                 throw new FormatException($"[CONSUME] INTO clause variable must be of type object or array.");
+            }
+
+            if (!declare.Type.IsArray)
+            {
+                consume.IsStream = true; // stream or batch processing mode
             }
 
             DefineStatement schema = new() { Identifier = "RabbitMQ.Message" };

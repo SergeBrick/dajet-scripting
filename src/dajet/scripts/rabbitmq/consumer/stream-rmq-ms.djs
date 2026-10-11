@@ -1,7 +1,6 @@
 
 PRIVATE @message object
 PRIVATE @headers object
-PRIVATE @Счётчик integer
 
 SET @headers.version = '1.0'
 
@@ -10,6 +9,7 @@ CONSUME 'amqp://guest:guest@localhost:5672'
    INTO @message
 
 USE 'MS_TEST'
+
   INSERT РегистрСведений.ВходящаяОчередь
   SELECT Отправитель    = @message.AppId
        , ДатаВремя      = NOW()
@@ -19,6 +19,4 @@ USE 'MS_TEST'
        , ТекстОшибки    = JSON(@message.Headers)
 END
 
---THROW 'error from script'
-
---RETURN '[RabbitMQ] [CONSUME] End of script'
+--THROW '[ERROR][TEST] After INSERT'

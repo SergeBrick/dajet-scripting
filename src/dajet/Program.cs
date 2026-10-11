@@ -72,7 +72,7 @@ namespace DaJet.Host
 
             Stopwatch watch = new();
             watch.Start();
-            Task<object> task = _host.RunAsync("rabbitmq/consumer/stream-rmq-ms.djs");
+            Task<object> task = _host.RunAsync("rabbitmq/consumer/batch-rmq-ms.djs");
             try
             {
                 task.Wait();

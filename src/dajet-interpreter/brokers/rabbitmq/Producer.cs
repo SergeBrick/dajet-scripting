@@ -40,7 +40,6 @@ namespace DaJet.RabbitMQ
         private IConnection _connection;
         private BasicProperties _properties;
         private InvalidOperationException _broken;
-        private readonly Lock _confirmLock = new();
         private readonly CountdownEvent _confirmTracker = new(0);
         private readonly ConcurrentDictionary<ulong, bool> _published = new(2, 1000);
         public Producer(in ScriptContext context, in ProduceStatement statement)
@@ -810,39 +809,36 @@ namespace DaJet.RabbitMQ
             bool multiple = args.Multiple;
             ulong deliveryTag = args.DeliveryTag;
 
-            lock (_confirmLock) // Do we really need it !?
+            if (multiple)
             {
-                if (multiple)
-                {
-                    int count = 0;
+                int count = 0;
 
-                    foreach (KeyValuePair<ulong, bool> pending in _published.ToArray())
+                foreach (KeyValuePair<ulong, bool> pending in _published.ToArray())
+                {
+                    if (pending.Key <= deliveryTag)
                     {
-                        if (pending.Key <= deliveryTag)
+                        if (_published.TryRemove(pending.Key, out _))
                         {
-                            if (_published.TryRemove(pending.Key, out _))
-                            {
-                                count++;
-                            }
-                            else
-                            {
-                                FileLogger.Default.Write(string.Format(ERROR_FAILED_TO_ACK, deliveryTag, "multiple"));
-                            }
+                            count++;
+                        }
+                        else
+                        {
+                            FileLogger.Default.Write(string.Format(ERROR_FAILED_TO_ACK, deliveryTag, "multiple"));
                         }
                     }
+                }
 
-                    _ = _confirmTracker.Signal(count);
+                _ = _confirmTracker.Signal(count);
+            }
+            else
+            {
+                if (_published.TryRemove(deliveryTag, out _))
+                {
+                    _ = _confirmTracker.Signal();
                 }
                 else
                 {
-                    if (_published.TryRemove(deliveryTag, out _))
-                    {
-                        _ = _confirmTracker.Signal();
-                    }
-                    else
-                    {
-                        FileLogger.Default.Write(string.Format(ERROR_FAILED_TO_ACK, deliveryTag, "single"));
-                    }
+                    FileLogger.Default.Write(string.Format(ERROR_FAILED_TO_ACK, deliveryTag, "single"));
                 }
             }
 

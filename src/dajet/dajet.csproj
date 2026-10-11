@@ -171,6 +171,9 @@
     <None Update="scripts\produce\stream-ms-rmq.djs">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Update="scripts\rabbitmq\consumer\batch-rmq-ms.djs">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Update="scripts\rabbitmq\consumer\stream-rmq-ms.djs">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

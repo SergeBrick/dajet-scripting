@@ -7,6 +7,7 @@ using RabbitMQ.Client.Events;
 using System.Text;
 using System.Timers;
 using System.Web;
+using RmqConstants = RabbitMQ.Client.Constants;
 
 namespace DaJet.RabbitMQ
 {
@@ -33,8 +34,10 @@ namespace DaJet.RabbitMQ
         private int _consumed = 0;
         private string _consumerTag;
         private readonly string _output;
-        private readonly List<DataObject> _batch;
-        private readonly SemaphoreSlim _batchLock = new(1, 1);
+        private ulong _deliveryTag;
+        private List<DataObject> _batch;
+        private SemaphoreSlim _batchLock;
+        private System.Timers.Timer _batchTimer;
         public Consumer(in ScriptContext context, in ConsumeStatement statement)
         {
             _context = context;
@@ -48,6 +51,17 @@ namespace DaJet.RabbitMQ
             if (_statement.Into.Value is VariableReference variable)
             {
                 _output = variable.Identifier;
+            }
+
+            if (_statement.IsStream)
+            {
+                DataObject message = new(9);
+                _context.SetValue(_output, message);
+            }
+            else
+            {
+                _batch = new List<DataObject>(100);
+                _context.SetValue(_output, _batch);
             }
 
             ConfigureConsumerSettings();
@@ -78,6 +92,8 @@ namespace DaJet.RabbitMQ
                     cancellation.Dispose();
                 }
 
+                ConfigureBatchProcessing();
+
                 EnsureConsumerIsActive(this, null);
 
                 _heartbeat.Start();
@@ -94,6 +110,28 @@ namespace DaJet.RabbitMQ
 
             return ExitCode.Success;
         }
+        private void ConfigureBatchProcessing()
+        {
+            if (_statement.IsStream)
+            {
+                return;
+            }
+
+            _batchLock = new SemaphoreSlim(1, 1);
+
+            System.Timers.Timer timer = new();
+
+            if (Interlocked.CompareExchange(ref _batchTimer, timer, null) is not null)
+            {
+                timer.Dispose();
+            }
+            else
+            {
+                _batchTimer.AutoReset = false;
+                _batchTimer.Elapsed += ProcessBatchTimeout;
+                _batchTimer.Interval = TimeSpan.FromSeconds(BatchTimeout).TotalMilliseconds;
+            }
+        }
 
         #region "CONFIGURATION AND PROCESSOR OPTIONS"
         private string HostName { get; set; } = "localhost";
@@ -105,6 +143,9 @@ namespace DaJet.RabbitMQ
         private int Heartbeat { get; set; } = 60; // consumer health check (seconds)
         private uint PrefetchSize { get; set; } = 0; // size of the client buffer in bytes
         private ushort PrefetchCount { get; set; } = 1; // allowed messages on the fly without ack
+        private int BatchSize { get; set; } = 1048576; // bytes
+        private int BatchCount { get; set; } = 100; // message count
+        private int BatchTimeout { get; set; } = 1; // seconds
         private string GetQueueName()
         {
             if (_options.TryGetValue("QueueName", out SyntaxNode expression))
@@ -228,7 +269,7 @@ namespace DaJet.RabbitMQ
 
             _consumer = new AsyncEventingBasicConsumer(_channel);
             
-            _consumer.ReceivedAsync += ProcessMessage;
+            _consumer.ReceivedAsync += ProcessMessageAsync;
 
             _consumerTag = await _channel.BasicConsumeAsync(QueueName, false, _consumer, _context.Cancellation).ConfigureAwait(false);
         }
@@ -278,35 +319,59 @@ namespace DaJet.RabbitMQ
                 }
             }
         }
-
-        private async Task ProcessMessage(object sender, BasicDeliverEventArgs args)
+        
+        private async Task ProcessMessageAsync(object sender, BasicDeliverEventArgs args)
         {
-            if (sender is not AsyncEventingBasicConsumer consumer) { return; }
-
-            IChannel channel = consumer.Channel;
-
-            if (channel is null) { return; }
-
-            ulong deliveryTag = args.DeliveryTag;
+            _deliveryTag = args.DeliveryTag;
 
             object value = _context.GetValue(_output);
 
-            if (value is DataObject message)
+            if (value is not DataObject message)
             {
-                ProcessHeaders(in message, in args);
-                message.SetValue("Body", DecodeMessageBody(args.Body));
-                message.SetValue(nameof(IBasicProperties.AppId), args.BasicProperties.AppId ?? string.Empty);
-                message.SetValue(nameof(IBasicProperties.ReplyTo), args.BasicProperties.ReplyTo ?? string.Empty);
-                message.SetValue(nameof(IBasicProperties.MessageId), args.BasicProperties.MessageId ?? string.Empty);
-                message.SetValue(nameof(IBasicProperties.CorrelationId), args.BasicProperties.CorrelationId ?? string.Empty);
-                message.SetValue(nameof(IBasicProperties.Type), args.BasicProperties.Type ?? string.Empty);
-                message.SetValue(nameof(IBasicProperties.ContentType), args.BasicProperties.ContentType ?? "application/json");
-                message.SetValue(nameof(IBasicProperties.ContentEncoding), args.BasicProperties.ContentEncoding ?? "UTF-8");
+                message = new DataObject(9);
+
+                if (_statement.IsStream)
+                {
+                    _context.SetValue(_output, message);
+                }
             }
+
+            ProcessHeaders(in message, in args);
+            message.SetValue("Body", DecodeMessageBody(args.Body));
+            message.SetValue(nameof(IBasicProperties.AppId), args.BasicProperties.AppId ?? string.Empty);
+            message.SetValue(nameof(IBasicProperties.ReplyTo), args.BasicProperties.ReplyTo ?? string.Empty);
+            message.SetValue(nameof(IBasicProperties.MessageId), args.BasicProperties.MessageId ?? string.Empty);
+            message.SetValue(nameof(IBasicProperties.CorrelationId), args.BasicProperties.CorrelationId ?? string.Empty);
+            message.SetValue(nameof(IBasicProperties.Type), args.BasicProperties.Type ?? string.Empty);
+            message.SetValue(nameof(IBasicProperties.ContentType), args.BasicProperties.ContentType ?? "application/json");
+            message.SetValue(nameof(IBasicProperties.ContentEncoding), args.BasicProperties.ContentEncoding ?? "UTF-8");
 
             //NOTE: Все ошибки, возникающие в процессе обработки события Received,
             //NOTE: EventingBasicConsumer перехватывает, "проглатывает" и не падает.
-            
+
+            if (_statement.IsStream)
+            {
+                await ProcessStreamHandler();
+            }
+            else
+            {
+                await ProcessBatchHandler(message);
+            }
+        }
+        private async Task ProcessStreamHandler()
+        {
+            IChannel channel = _channel;
+
+            if (channel is null) { return; }
+
+            ulong deliveryTag = _deliveryTag;
+
+            if (deliveryTag == 0UL) { return; }
+
+            bool batchMode = !_statement.IsStream;
+
+            int consumed = batchMode ? _batch.Count : 1;
+
             ExitCode code;
 
             try
@@ -319,18 +384,73 @@ namespace DaJet.RabbitMQ
 
                 FileLogger.Default.Write(ExceptionHelper.GetErrorMessage(error));
             }
+            finally
+            {
+                if (batchMode)
+                {
+                    _batch.Clear();
+                }
+            }
 
             if (code == ExitCode.Success)
             {
-                bool multiple = false; //TODO: batch consume !?
+                await channel.BasicAckAsync(deliveryTag, batchMode).ConfigureAwait(false);
 
-                await channel.BasicAckAsync(deliveryTag, multiple).ConfigureAwait(false);
-
-                _ = Interlocked.Increment(ref _consumed);
+                _consumed += consumed;
             }
             else
             {
-                await NackMessage(channel, deliveryTag).ConfigureAwait(false);
+                await NackMessage(channel, deliveryTag, batchMode).ConfigureAwait(false);
+            }
+        }
+        private async Task ProcessBatchHandler(DataObject message)
+        {
+            _batchTimer.Stop();
+            
+            _batchLock.Wait();
+
+            _batch.Add(message);
+
+            try
+            {
+                if (_batch.Count == PrefetchCount)
+                {
+                    await ProcessStreamHandler();
+                }
+            }
+            finally
+            {
+                _batchLock.Release();
+            }
+
+            _batchTimer.Start();
+        }
+        private void ProcessBatchTimeout(object sender, ElapsedEventArgs args)
+        {
+            if (_state != STATE_RUNNING)
+            {
+                return;
+            }
+
+            _batchLock.Wait();
+
+            if (_batch.Count == 0)
+            {
+                _batchLock.Release(); return;
+            }
+
+            try
+            {
+                Task task = ProcessStreamHandler();
+
+                if (!task.IsCompleted)
+                {
+                    task.GetAwaiter().GetResult();
+                }
+            }
+            finally
+            {
+                _batchLock.Release();
             }
         }
         private static void ProcessHeaders(in DataObject message, in BasicDeliverEventArgs args)
@@ -346,7 +466,7 @@ namespace DaJet.RabbitMQ
 
             foreach (var header in message_headers)
             {
-                if (header.Key == "CC")
+                if (header.Key == "CC" || header.Key == RmqConstants.PublishSequenceNumberHeader)
                 {
                     continue; // Игнорируем стандартный заголовок
                 }
@@ -387,7 +507,7 @@ namespace DaJet.RabbitMQ
         {
             return Encoding.UTF8.GetString(message.Span);
         }
-        private async Task NackMessage(IChannel channel, ulong deliveryTag)
+        private async Task NackMessage(IChannel channel, ulong deliveryTag, bool multiple)
         {
             ManualResetEventSlim cancellation = _cancellation;
 
@@ -403,56 +523,8 @@ namespace DaJet.RabbitMQ
 
             if (!signaled) // Consumer is still active
             {
-                await channel.BasicNackAsync(deliveryTag, false, true).ConfigureAwait(false);
+                await channel.BasicNackAsync(deliveryTag, multiple, true).ConfigureAwait(false);
             }
-        }
-
-        private async Task ProcessBatchByCount(IChannel channel, uint deliveryTag, DataObject message)
-        {
-            _heartbeat.Stop();
-
-            try
-            {
-                _batchLock.Wait();
-
-                if (_batch.Count == PrefetchCount)
-                {
-                    ExitCode code = _context.Callback(_statement.Statements);
-
-                    if (code == ExitCode.Success)
-                    {
-                        bool multiple = false; //TODO: batch consume !?
-
-                        await channel.BasicAckAsync(deliveryTag, multiple).ConfigureAwait(false);
-
-                        _ = Interlocked.Increment(ref _consumed);
-                    }
-                    else
-                    {
-                        await NackMessage(channel, deliveryTag).ConfigureAwait(false);
-                    }
-                }
-            }
-            finally
-            {
-                _batchLock.Release();
-            }
-            
-            _heartbeat.Start();
-        }
-        private void ProcessBatchByTimeout()
-        {
-            _heartbeat.Stop();
-
-            lock (_batchLock)
-            {
-                if (_batch.Count > 0)
-                {
-                    ExitCode code = _context.Callback(_statement.Statements);
-                }
-            }
-
-            _heartbeat.Start();
         }
 
         public override void Dispose()
@@ -462,6 +534,8 @@ namespace DaJet.RabbitMQ
                 DisposeHeartbeat();
 
                 DisposeConsumer();
+
+                DisposeBatchMode();
 
                 SignalCancellation();
 
@@ -476,7 +550,7 @@ namespace DaJet.RabbitMQ
         {
             try
             {
-                _consumer?.ReceivedAsync -= ProcessMessage;
+                _consumer?.ReceivedAsync -= ProcessMessageAsync;
                 _ = _channel?.BasicCancelAsync(_consumerTag);
             }
             catch { /* IGNORE */ }
@@ -491,6 +565,26 @@ namespace DaJet.RabbitMQ
             finally { _connection = null; }
 
             _consumerTag = null;
+        }
+        private void DisposeBatchMode()
+        {
+            if (_statement.IsStream)
+            {
+                return;
+            }
+
+            try
+            {
+                _batchTimer?.Stop();
+                _batchTimer?.Dispose();
+            }
+            finally
+            {
+                _batchTimer = null;
+            }
+
+            try { _batchLock?.Dispose(); }
+            finally { _batchLock = null; }
         }
         private void DisposeHeartbeat()
         {
