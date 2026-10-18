@@ -530,10 +530,18 @@ namespace DaJet.Scripting
             {
                 return ExecuteDatabaseConsumer(in statement);
             }
-            else
+            
+            if (statement.Target == "kafka")
+            {
+                return ExecuteKafkaConsumer(in statement);
+            }
+
+            if (statement.Target.StartsWith("amqp"))
             {
                 return ExecuteRabbitMQConsumer(in statement);
             }
+
+            throw new InvalidOperationException($"Unsupported consumer: {statement.Target}");
         }
         private ExitCode ExecuteDatabaseConsumer(in ConsumeStatement statement)
         {
@@ -552,6 +560,28 @@ namespace DaJet.Scripting
                 {
                     processor = new PgConsumeProcessor(this, in statement);
                 }
+
+                _processors.Add(statement, processor);
+            }
+
+            ExitCode code = ExitCode.Success;
+
+            try
+            {
+                code = processor.Process();
+            }
+            finally
+            {
+                processor.Dispose();
+            }
+
+            return code;
+        }
+        private ExitCode ExecuteKafkaConsumer(in ConsumeStatement statement)
+        {
+            if (!_processors.TryGetValue(statement, out ProcessorBase processor))
+            {
+                processor = new Kafka.Consumer(this, in statement);
 
                 _processors.Add(statement, processor);
             }
@@ -591,6 +621,7 @@ namespace DaJet.Scripting
 
             return code;
         }
+        
         private ExitCode Execute(in InsertStatement statement)
         {
             if (GetDataSource() is not DataSourceScope use)
@@ -680,8 +711,19 @@ namespace DaJet.Scripting
         {
             if (!_processors.TryGetValue(statement, out ProcessorBase processor))
             {
-                processor = new RabbitMQ.Producer(this, in statement);
-
+                if (statement.Target == "kafka")
+                {
+                    processor = new Kafka.Producer(this, in statement);
+                }
+                else if (statement.Target.StartsWith("amqp"))
+                {
+                    processor = new RabbitMQ.Producer(this, in statement);
+                }
+                else
+                {
+                    throw new InvalidOperationException($"Unsupported producer: {statement.Target}");
+                }
+                
                 _processors.Add(statement, processor);
             }
 
