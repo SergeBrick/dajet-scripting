@@ -212,6 +212,8 @@ namespace DaJet.Scripting
             else if (node is ProduceStatement produce) { return Execute(in produce); }
 
             return ExitCode.Success;
+
+            // throw new NotImplementedException($"Statement is not implemented: {node.GetType()}");
         }
         private ExitCode Execute(in StatementBlock statements)
         {
@@ -531,14 +533,14 @@ namespace DaJet.Scripting
                 return ExecuteDatabaseConsumer(in statement);
             }
             
-            if (statement.Target == "kafka")
-            {
-                return ExecuteKafkaConsumer(in statement);
-            }
-
             if (statement.Target.StartsWith("amqp"))
             {
                 return ExecuteRabbitMQConsumer(in statement);
+            }
+
+            if (statement.Target == "kafka")
+            {
+                return ExecuteApacheKafkaConsumer(in statement);
             }
 
             throw new InvalidOperationException($"Unsupported consumer: {statement.Target}");
@@ -560,28 +562,6 @@ namespace DaJet.Scripting
                 {
                     processor = new PgConsumeProcessor(this, in statement);
                 }
-
-                _processors.Add(statement, processor);
-            }
-
-            ExitCode code = ExitCode.Success;
-
-            try
-            {
-                code = processor.Process();
-            }
-            finally
-            {
-                processor.Dispose();
-            }
-
-            return code;
-        }
-        private ExitCode ExecuteKafkaConsumer(in ConsumeStatement statement)
-        {
-            if (!_processors.TryGetValue(statement, out ProcessorBase processor))
-            {
-                processor = new Kafka.Consumer(this, in statement);
 
                 _processors.Add(statement, processor);
             }
@@ -621,7 +601,29 @@ namespace DaJet.Scripting
 
             return code;
         }
-        
+        private ExitCode ExecuteApacheKafkaConsumer(in ConsumeStatement statement)
+        {
+            if (!_processors.TryGetValue(statement, out ProcessorBase processor))
+            {
+                processor = new Kafka.Consumer(this, in statement);
+
+                _processors.Add(statement, processor);
+            }
+
+            ExitCode code = ExitCode.Success;
+
+            try
+            {
+                code = processor.Process();
+            }
+            finally
+            {
+                processor.Dispose();
+            }
+
+            return code;
+        }
+
         private ExitCode Execute(in InsertStatement statement)
         {
             if (GetDataSource() is not DataSourceScope use)

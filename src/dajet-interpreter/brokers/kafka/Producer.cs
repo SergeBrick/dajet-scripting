@@ -4,7 +4,6 @@ using DaJet.Scripting;
 using DaJet.Scripting.Model;
 using DaJet.Utilities;
 using System.Text;
-using static System.Runtime.InteropServices.JavaScript.JSType;
 using Error = Confluent.Kafka.Error;
 
 namespace DaJet.Kafka
@@ -13,15 +12,13 @@ namespace DaJet.Kafka
     {
         private readonly ScriptContext _context;
         private readonly ProduceStatement _statement;
-        private readonly Dictionary<string, SyntaxNode> _select = new();
         private readonly Dictionary<string, SyntaxNode> _options = new();
+        private readonly Dictionary<string, SyntaxNode> _payload = new();
+        private string _error;
         private int _produced;
         private int _persisted;
-        private string _error;
-        private string _topic;
         private readonly ProducerConfig _config;
         private IProducer<byte[], byte[]> _producer;
-        private readonly Message<byte[], byte[]> _message = new();
         private readonly Action<IProducer<byte[], byte[]>, Error> _errorHandler;
         private readonly Action<IProducer<byte[], byte[]>, LogMessage> _logHandler;
         private readonly Action<DeliveryReport<byte[], byte[]>> _deliveryHandler;
@@ -40,7 +37,7 @@ namespace DaJet.Kafka
 
             foreach (ColumnExpression column in _statement.Columns)
             {
-                _select.Add(column.Alias, column.Expression);
+                _payload.Add(column.Alias, column.Expression);
             }
 
             _logHandler = LogHandler;
@@ -66,70 +63,92 @@ namespace DaJet.Kafka
         }
         private byte[] GetKey()
         {
-            if (_select.TryGetValue("Key", out SyntaxNode expression))
+            if (_payload.TryGetValue("Key", out SyntaxNode expression))
             {
                 object value = _context.Evaluate(in expression);
 
+                if (value is null)
+                {
+                    throw new InvalidOperationException("Null value is not allowed for the \"Key\" property of a record.");
+                }
+
                 if (value is byte[] binary)
                 {
-                    return binary;
+                    return binary; // protobuf
                 }
-                else if (value is string text && !string.IsNullOrEmpty(text))
+                
+                if (value is string text)
                 {
+                    if (string.IsNullOrWhiteSpace(text))
+                    {
+                        throw new InvalidOperationException("Empty string value is not allowed for the \"Key\" property of a record.");
+                    }
+
                     return Encoding.UTF8.GetBytes(text);
                 }
+                
+                return Encoding.UTF8.GetBytes(value.ToString()); //THINK: integer, decimal, uuid - binary format ?
             }
             
-            return null;
+            return null; // optional value
         }
         private byte[] GetValue()
         {
-            if (_select.TryGetValue("Value", out SyntaxNode expression))
+            if (!_payload.TryGetValue("Value", out SyntaxNode expression))
             {
-                object value = _context.Evaluate(in expression);
-
-                if (value is byte[] binary)
-                {
-                    return binary;
-                }
-                else if (value is string text && !string.IsNullOrEmpty(text))
-                {
-                    return Encoding.UTF8.GetBytes(text);
-                }
+                throw new InvalidOperationException("The \"Value\" property of the record is not defined.");
             }
 
-            return Array.Empty<byte>();
+            object value = _context.Evaluate(in expression);
+
+            if (value is null)
+            {
+                throw new InvalidOperationException("Null value is not allowed for the \"Value\" property of a record.");
+            }
+
+            if (value is byte[] binary)
+            {
+                return binary; // protobuf
+            }
+
+            if (value is string text)
+            {
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    throw new InvalidOperationException("Empty string value is not allowed for the \"Value\" property of a record.");
+                }
+
+                return Encoding.UTF8.GetBytes(text);
+            }
+
+            throw new InvalidOperationException("The \"Value\" property of a record must be a string or binary value.");
         }
         private string GetTopic()
         {
-            if (_select.TryGetValue("Topic", out SyntaxNode expression))
+            if (!_payload.TryGetValue("Topic", out SyntaxNode expression))
             {
-                object value = _context.Evaluate(in expression);
-
-                return value.ToString();
+                throw new InvalidOperationException("Topic is not defined.");
             }
 
-            return string.Empty;
+            object value = _context.Evaluate(in expression);
+
+            if (value is not string topic)
+            {
+                throw new InvalidOperationException("Topic must be a string.");
+            }
+
+            if (string.IsNullOrWhiteSpace(topic))
+            {
+                throw new InvalidOperationException("Topic value is empty.");
+            }
+
+            return topic;
         }
         public override ExitCode Process()
         {
             if (_context.IsCancellationRequested)
             {
                 return ExitCode.Cancel;
-            }
-
-            if (_producer is null) // initial state of processor
-            {
-                if (_context.GetDataSource() is DataSourceScope scope)
-                {
-                    scope.OnCommit += SynchronizeCommit;
-                    scope.OnCancel += SynchronizeCancel;
-                }
-
-                _producer = new ProducerBuilder<byte[], byte[]>(_config)
-                    .SetLogHandler(_logHandler)
-                    .SetErrorHandler(_errorHandler)
-                    .Build();
             }
             
             ExitCode code = ExitCode.Success;
@@ -138,34 +157,72 @@ namespace DaJet.Kafka
             {
                 ThrowIfStateIsBroken();
 
-                _topic = GetTopic();
-                _message.Key = GetKey();
-                _message.Value = GetValue();
+                EnsureProcessorIsInitialized();
 
-                _producer.Produce(_topic, _message, _deliveryHandler); // async inside - returns immediately
+                var message = new Message<byte[], byte[]>()
+                {
+                    Key = GetKey(),
+                    Value = GetValue()
+                    //TODO: Headers !?
+                };
+
+                _producer.Produce(GetTopic(), message, _deliveryHandler); // async inside - returns immediately
 
                 _ = Interlocked.Increment(ref _produced);
             }
-            catch (Exception error)
+            catch (ProduceException<byte[], byte[]> error)
             {
-                string message = ExceptionHelper.GetErrorMessage(error);
-
-                FileLogger.Default.Write($"[ERROR][DaJet.Kafka.Producer][{_config.ClientId}][{_topic}] {message}");
-
+                WriteToLogProducerError(in error); ResetState(); throw;
+            }
+            catch
+            {
                 ResetState(); throw;
             }
 
             return code;
         }
+        private void EnsureProcessorIsInitialized()
+        {
+            if (_producer is null) // uninitialized processor state
+            {
+                DataSourceScope scope = _context.GetDataSource();
+
+                if (scope is not null)
+                {
+                    // enter database scope if present
+                    scope.OnCommit += SynchronizeCommit;
+                    scope.OnCancel += SynchronizeCancel;
+                }
+
+                try
+                {
+                    _producer = new ProducerBuilder<byte[], byte[]>(_config)
+                        .SetLogHandler(_logHandler)
+                        .SetErrorHandler(_errorHandler)
+                        .Build();
+                }
+                catch (Exception error)
+                {
+                    if (scope is not null)
+                    {
+                        // exit database scope on failure
+                        scope.OnCommit -= SynchronizeCommit;
+                        scope.OnCancel -= SynchronizeCancel;
+                    }
+
+                    WriteToLogFailedToBuildProducer(in error); throw;
+                }
+            }
+        }
         private void LogHandler(IProducer<byte[], byte[]> _, LogMessage message)
         {
-            FileLogger.Default.Write($"[INFO][DaJet.Kafka.Producer][{_config.ClientId}][{_topic}] {message.Name}: {message.Message}");
+            FileLogger.Default.Write($"[INFO][DaJet.Kafka.Producer][{_config.ClientId}] {message.Name}: {message.Message}");
         }
         private void ErrorHandler(IProducer<byte[], byte[]> _, Error error)
         {
-            _error = error.Reason;
+            _error = $"[ERROR][DaJet.Kafka.Producer][{_config.ClientId}] {error.Reason}";
 
-            FileLogger.Default.Write($"[ERROR][DaJet.Kafka.Producer][{_config.ClientId}][{_topic}] {_error}");
+            FileLogger.Default.Write(_error);
         }
         private void DeliveryHandler(DeliveryReport<byte[], byte[]> report)
         {
@@ -176,74 +233,65 @@ namespace DaJet.Kafka
 
             if (report.Error is not null && report.Error.Code != ErrorCode.NoError)
             {
-                _error = report.Error.Reason;
+                _error = $"[ERROR][DaJet.Kafka.Producer][{_config.ClientId}][{report.Topic}] {{{report.Error.Code}}} {report.Error.Reason}";
 
-                FileLogger.Default.Write($"[ERROR][DaJet.Kafka.Producer][{_config.ClientId}][{report.Topic}] {_error}");
+                FileLogger.Default.Write(_error);
             }
         }
-        private void ThrowIfStateIsBroken()
+        private void SynchronizeCommit(object sender, EventArgs args)
         {
-            string error = _error;
+            if (_context.IsCancellationRequested) { return; }
 
-            if (error is not null)
-            {
-                string message = $"[BROKEN][DaJet.Kafka.Producer][{_config.ClientId}][{_topic}] Persisted {_persisted} of {_produced} messages.";
-
-                FileLogger.Default.Write(message);
-
-                throw new InvalidOperationException(message);
-            }
-        }
-        public void SynchronizeCommit(object sender, EventArgs args)
-        {
-            if (_context.IsCancellationRequested)
-            {
-                return;
-            }
-
-            bool success = true;
-            
             try
             {
                 ThrowIfStateIsBroken();
 
                 // Wait until all outstanding produce requests and delivery report callbacks are completed.
+                // The related configuration parameter is "message.timeout.ms",
+                // which determines the maximum length of time librdkafka attempts to deliver a message
+                // and so also affects the maximum time a call to "Flush" method may block.
+
                 _producer.Flush(_context.Cancellation);
 
-                if (_produced != _persisted) // Something went wrong: throw an exception to trigger a database transaction rollback.
+                if (_produced == _persisted)
                 {
-                    throw new InvalidOperationException($"[ERROR][DaJet.Kafka.Producer][{_config.ClientId}][{_topic}] Failed to confirm {_produced - _persisted} of {_produced} messages.");
+                    WriteToLogSuccessfulStory();
+                }
+                else // Throw an exception to trigger a database transaction rollback.
+                {
+                    ThrowFailedToConfirmDeliveries();
                 }
             }
-            catch
+            catch (OperationCanceledException)
             {
-                success = false; throw; // Failed commit: Cancel will be called
+                WriteToLogWarningOnCancellation(); throw;
             }
             finally
             {
-                if (success) // Successful commit: Cancel won't be called
+                if (sender is DataSourceScope scope)
                 {
-                    SynchronizeCancel(sender, args);
+                    // exit database scope entered earlier
+                    scope.OnCommit -= SynchronizeCommit;
+                    scope.OnCancel -= SynchronizeCancel;
                 }
+
+                ResetState();
             }
         }
         private void SynchronizeCancel(object sender, EventArgs args)
         {
+            if (_producer is null)
+            {
+                return; // processor is not initialized
+            }
+
             if (sender is DataSourceScope scope)
             {
+                // exit database scope entered earlier
                 scope.OnCommit -= SynchronizeCommit;
                 scope.OnCancel -= SynchronizeCancel;
             }
-
-            if (_produced == _persisted)
-            {
-                FileLogger.Default.Write($"[SUCCESS][DaJet.Kafka.Producer][{_config.ClientId}][{_topic}] Produced {_persisted} messages.");
-            }
-            else
-            {
-                FileLogger.Default.Write($"[WARNING][DaJet.Kafka.Producer][{_config.ClientId}][{_topic}] Persisted {_persisted} of {_produced} messages.");
-            }
-
+            
             ResetState();
         }
         private void ResetState()
@@ -251,8 +299,6 @@ namespace DaJet.Kafka
             _error = null;
             _produced = 0;
             _persisted = 0;
-            _message.Key = null;
-            _message.Value = null;
 
             try { _producer?.Dispose(); }
             catch { /* ignore errors */ }
@@ -264,6 +310,54 @@ namespace DaJet.Kafka
 
             // Commit and Cancel methods will never be called
             // if processor is not bound to a data source (scoped)
+        }
+
+        private void ThrowIfStateIsBroken()
+        {
+            if (_error is not null)
+            {
+                string message = $"[ERROR][DaJet.Kafka.Producer][{_config.ClientId}] Broken state detected: persisted {_persisted} of {_produced} messages.";
+
+                FileLogger.Default.Write(message);
+
+                throw new InvalidOperationException(message);
+            }
+        }
+        private void WriteToLogSuccessfulStory()
+        {
+            FileLogger.Default.Write($"[SUCCESS][DaJet.Kafka.Producer][{_config.ClientId}] Produced {_persisted} messages.");
+        }
+        private void WriteToLogFailedToBuildProducer(in Exception error)
+        {
+            string message = $"[ERROR][DaJet.Kafka.Producer][{_config.ClientId}] Failed to build producer: {ExceptionHelper.GetErrorMessage(error)}";
+
+            FileLogger.Default.Write(message);
+        }
+        private void WriteToLogProducerError(in ProduceException<byte[], byte[]> error)
+        {
+            string topic = error.DeliveryResult?.Topic;
+
+            ErrorCode code = error.Error is null ? ErrorCode.Unknown : error.Error.Code;
+
+            string reason = error.Error is null ? "Unknown delivery error." : error.Error.Reason;
+
+            _error = $"[ERROR][DaJet.Kafka.Producer][{_config.ClientId}][{topic}] Persisted {_persisted} of {_produced} messages. {{{code}}} {reason}";
+
+            FileLogger.Default.Write(_error);
+        }
+        private void ThrowFailedToConfirmDeliveries()
+        {
+            _error = $"[ERROR][DaJet.Kafka.Producer][{_config.ClientId}] Failed to confirm {_produced - _persisted} of {_produced} messages.";
+
+            FileLogger.Default.Write(_error);
+
+            throw new InvalidOperationException(_error);
+        }
+        private void WriteToLogWarningOnCancellation()
+        {
+            _error = $"[WARNING][DaJet.Kafka.Producer][{_config.ClientId}] Persisted {_persisted} of {_produced} messages.";
+
+            FileLogger.Default.Write(_error);
         }
     }
 }
