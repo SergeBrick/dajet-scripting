@@ -5,7 +5,7 @@ namespace DaJet.Scripting
 {
     public sealed class CacheableSchemaProvider : ISchemaProvider
     {
-        private static readonly Dictionary<string, EntityDefinition> _cache = new();
+        private readonly Dictionary<string, EntityDefinition> _cache = new();
         public int GetYearOffset(in string domain)
         {
             MetadataProvider provider = MetadataProvider.Get(in domain);
