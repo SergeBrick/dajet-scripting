@@ -53,6 +53,59 @@ namespace DaJet.Scripting
 
             return model is not null;
         }
+        private SyntaxNode statement()
+        {
+            if (Match(Token.Comment)) { return comment(); }
+            else if (Match(Token.Sharp)) { return directive(); }
+            else if (Match(Token.DECLARE, Token.PRIVATE)) { return declare_statement(); }
+            else if (Match(Token.SET)) { return assignment(); }
+            
+            else if (Match(Token.IF)) { return if_statement(); }
+            else if (Match(Token.FOR)) { return for_statement(); }
+            else if (Match(Token.WHILE)) { return while_statement(); }
+            else if (Match(Token.BREAK)) { return new BreakStatement(); }
+            else if (Match(Token.CONTINUE)) { return new ContinueStatement(); }
+            else if (Match(Token.RETURN)) { return return_statement(); }
+
+            else if (Match(Token.TRY)) { return try_statement(); }
+            else if (Match(Token.THROW)) { return throw_statement(); }
+            
+            else if (Match(Token.PRINT)) { return print_statement(); }
+            else if (Match(Token.SLEEP)) { return sleep_statement(); }
+            
+            else if (Match(Token.USE)) { return use_statement(); }
+            else if (Match(Token.WITH)) { return statement_with_cte(); }
+            else if (Check(Token.SELECT)) { return select_statement(); }
+            else if (Check(Token.STREAM)) { return stream_statement(); }
+            else if (Check(Token.CONSUME)) { return consume_statement(); }
+            else if (Check(Token.INSERT)) { return insert_statement(); }
+            //else if (Check(Token.UPDATE)) { return update_statement(); }
+            //else if (Check(Token.DELETE)) { return delete_statement(); }
+            
+            else if (Match(Token.CREATE)) { return create_statement(); }
+            else if (Match(Token.DROP)) { return drop_statement(); }
+            else if (Match(Token.APPLY)) { return apply_statement(); }
+            else if (Match(Token.REVOKE)) { return revoke_statement(); }
+
+            else if (Check(Token.PRODUCE)) { return produce_statement(); }
+
+            //else if (Check(Token.UPSERT)) { return upsert_statement(); }
+            //else if (Match(Token.CASE)) { return case_statement(); }
+            //else if (Check(Token.REQUEST)) { return request_statement(); }
+            //else if (Match(Token.EXECUTE)) { return execute_statement(); }
+            //else if (Match(Token.PROCESS)) { return process_statement(); }
+            //else if (Match(Token.WAIT)) { return wait_statement(); }
+            //else if (Match(Token.MODIFY)) { return modify_statement(); }
+
+            //else if (Match(Token.DEFINE)) { return define_statement(); }
+            //else if (Check(Token.IMPORT)) { return import_statement(); }
+
+            else if (Match(Token.EndOfStatement)) { return null; }
+
+            Ignore();
+
+            throw new FormatException($"Unknown statement: {Previous()}");
+        }
 
         #region "UTILITY FUNCTIONS"
         private bool EndOfStream()
@@ -976,50 +1029,6 @@ namespace DaJet.Scripting
 
             return statement;
         }
-        private SyntaxNode statement()
-        {
-            if (Match(Token.Comment)) { return comment(); }
-            else if (Match(Token.Sharp)) { return directive(); }
-            else if (Match(Token.DECLARE, Token.PRIVATE)) { return declare_statement(); }
-            else if (Match(Token.SET)) { return assignment(); }
-            else if (Match(Token.USE)) { return use_statement(); }
-            else if (Match(Token.FOR)) { return for_statement(); }
-            else if (Match(Token.TRY)) { return try_statement(); }
-            else if (Match(Token.THROW)) { return throw_statement(); }
-            else if (Match(Token.SLEEP)) { return sleep_statement(); }
-            else if (Match(Token.IF)) { return if_statement(); }
-            else if (Match(Token.CASE)) { return case_statement(); }
-            else if (Match(Token.WHILE)) { return while_statement(); }
-            else if (Match(Token.WITH)) { return statement_with_cte(); }
-            else if (Match(Token.CREATE)) { return create_statement(); }
-            else if (Check(Token.SELECT)) { return select_statement(); }
-            else if (Check(Token.INSERT)) { return insert_statement(); }
-            else if (Check(Token.UPDATE)) { return update_statement(); }
-            else if (Check(Token.DELETE)) { return delete_statement(); }
-            else if (Check(Token.UPSERT)) { return upsert_statement(); }
-            else if (Check(Token.STREAM)) { return stream_statement(); }
-            else if (Check(Token.CONSUME)) { return consume_statement(); }
-            else if (Check(Token.PRODUCE)) { return produce_statement(); }
-            else if (Check(Token.REQUEST)) { return request_statement(); }
-            else if (Check(Token.IMPORT)) { return import_statement(); }
-            else if (Match(Token.DROP)) { return drop_statement(); }
-            else if (Match(Token.APPLY)) { return apply_statement(); }
-            else if (Match(Token.REVOKE)) { return revoke_statement(); }
-            else if (Match(Token.PRINT)) { return print_statement(); }
-            else if (Match(Token.BREAK)) { return new BreakStatement(); }
-            else if (Match(Token.CONTINUE)) { return new ContinueStatement(); }
-            else if (Match(Token.RETURN)) { return return_statement(); }
-            else if (Match(Token.EXECUTE)) { return execute_statement(); }
-            else if (Match(Token.PROCESS)) { return process_statement(); }
-            else if (Match(Token.WAIT)) { return wait_statement(); }
-            else if (Match(Token.MODIFY)) { return modify_statement(); }
-            else if (Match(Token.DEFINE)) { return define_statement(); }
-            else if (Match(Token.EndOfStatement)) { return null; }
-
-            Ignore();
-
-            throw new FormatException($"Unknown statement: {Previous()}");
-        }
         private SyntaxNode print_statement() { return new PrintStatement() { Expression = expression() }; }
         private StatementBlock statement_block(params Token[] terminals)
         {
@@ -1275,43 +1284,45 @@ namespace DaJet.Scripting
                 return create_sequence();
             }
 
-            Token token = Token.TABLE;
+            throw new FormatException("Invalid CREATE statement");
 
-            if (Match(Token.TEMPORARY))
-            {
-                token = Previous().Token;
-            }
+            //Token token = Token.TABLE;
 
-            if (!Match(Token.TABLE))
-            {
-                throw new FormatException("TABLE keyword expected.");
-            }
+            //if (Match(Token.TEMPORARY))
+            //{
+            //    token = Previous().Token;
+            //}
 
-            if (Match(Token.VARIABLE))
-            {
-                token = Previous().Token;
-            }
+            //if (!Match(Token.TABLE))
+            //{
+            //    throw new FormatException("TABLE keyword expected.");
+            //}
 
-            if (token == Token.TABLE)
-            {
-                return create_table();
-            }
+            //if (Match(Token.VARIABLE))
+            //{
+            //    token = Previous().Token;
+            //}
 
-            if (!Check(Token.Identifier))
-            {
-                throw new FormatException("Table identifier expected.");
-            }
+            //if (token == Token.TABLE)
+            //{
+            //    return create_table();
+            //}
 
-            if (token == Token.VARIABLE)
-            {
-                return table_variable();
-            }
-            else if (token == Token.TEMPORARY)
-            {
-                return temporary_table();
-            }
+            //if (!Check(Token.Identifier))
+            //{
+            //    throw new FormatException("Table identifier expected.");
+            //}
 
-            throw new FormatException("Invalid CREATE TABLE statement.");
+            //if (token == Token.VARIABLE)
+            //{
+            //    return table_variable();
+            //}
+            //else if (token == Token.TEMPORARY)
+            //{
+            //    return temporary_table();
+            //}
+
+            //throw new FormatException("Invalid CREATE TABLE statement.");
         }
         private SyntaxNode drop_statement()
         {
@@ -1325,7 +1336,7 @@ namespace DaJet.Scripting
                 return drop_type();
             }
 
-            throw new FormatException("Unknown DROP statement.");
+            throw new FormatException("Invalid DROP statement.");
         }
         private SyntaxNode apply_statement()
         {
@@ -1334,7 +1345,7 @@ namespace DaJet.Scripting
                 return apply_sequence();
             }
 
-            throw new FormatException("Unknown APPLY statement");
+            throw new FormatException("Invalid APPLY statement");
         }
         private SyntaxNode revoke_statement()
         {
@@ -1343,7 +1354,7 @@ namespace DaJet.Scripting
                 return revoke_sequence();
             }
 
-            throw new FormatException("Unknown REVOKE statement");
+            throw new FormatException("Invalid REVOKE statement");
         }
         private SyntaxNode wait_statement()
         {

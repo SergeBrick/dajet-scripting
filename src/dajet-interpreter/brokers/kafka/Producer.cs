@@ -220,9 +220,11 @@ namespace DaJet.Kafka
         }
         private void ErrorHandler(IProducer<byte[], byte[]> _, Error error)
         {
-            _error = $"[ERROR][DaJet.Kafka.Producer][{_config.ClientId}] {error.Reason}";
+            string message = $"[ERROR][DaJet.Kafka.Producer][{_config.ClientId}] {error.Reason}";
 
-            FileLogger.Default.Write(_error);
+            _error = message;
+
+            FileLogger.Default.Write(message);
         }
         private void DeliveryHandler(DeliveryReport<byte[], byte[]> report)
         {
@@ -233,9 +235,11 @@ namespace DaJet.Kafka
 
             if (report.Error is not null && report.Error.Code != ErrorCode.NoError)
             {
-                _error = $"[ERROR][DaJet.Kafka.Producer][{_config.ClientId}][{report.Topic}] {{{report.Error.Code}}} {report.Error.Reason}";
+                string error = $"[ERROR][DaJet.Kafka.Producer][{_config.ClientId}][{report.Topic}] {{{report.Error.Code}}} {report.Error.Reason}";
 
-                FileLogger.Default.Write(_error);
+                _error = error;
+
+                FileLogger.Default.Write(error);
             }
         }
         private void SynchronizeCommit(object sender, EventArgs args)
@@ -341,23 +345,21 @@ namespace DaJet.Kafka
 
             string reason = error.Error is null ? "Unknown delivery error." : error.Error.Reason;
 
-            _error = $"[ERROR][DaJet.Kafka.Producer][{_config.ClientId}][{topic}] Persisted {_persisted} of {_produced} messages. {{{code}}} {reason}";
+            string message = $"[ERROR][DaJet.Kafka.Producer][{_config.ClientId}][{topic}] Persisted {_persisted} of {_produced} messages. {{{code}}} {reason}";
 
-            FileLogger.Default.Write(_error);
+            FileLogger.Default.Write(message);
         }
         private void ThrowFailedToConfirmDeliveries()
         {
-            _error = $"[ERROR][DaJet.Kafka.Producer][{_config.ClientId}] Failed to confirm {_produced - _persisted} of {_produced} messages.";
+            string error = $"[ERROR][DaJet.Kafka.Producer][{_config.ClientId}] Failed to confirm {_produced - _persisted} of {_produced} messages.";
 
-            FileLogger.Default.Write(_error);
+            FileLogger.Default.Write(error);
 
-            throw new InvalidOperationException(_error);
+            throw new InvalidOperationException(error);
         }
         private void WriteToLogWarningOnCancellation()
         {
-            _error = $"[WARNING][DaJet.Kafka.Producer][{_config.ClientId}] Persisted {_persisted} of {_produced} messages.";
-
-            FileLogger.Default.Write(_error);
+            FileLogger.Default.Write($"[WARNING][DaJet.Kafka.Producer][{_config.ClientId}] Persisted {_persisted} of {_produced} messages.");
         }
     }
 }

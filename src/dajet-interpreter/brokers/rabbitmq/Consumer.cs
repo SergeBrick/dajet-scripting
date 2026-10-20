@@ -148,17 +148,19 @@ namespace DaJet.RabbitMQ
         private int BatchTimeout { get; set; } = 1; // seconds
         private string GetQueueName()
         {
-            if (_options.TryGetValue("QueueName", out SyntaxNode expression))
+            if (!_options.TryGetValue("QueueName", out SyntaxNode expression))
             {
-                object value = _context.Evaluate(in expression);
-
-                if (value is string text)
-                {
-                    return text;
-                }
+                throw new InvalidOperationException("QueueName is not defined.");
             }
 
-            return string.Empty;
+            object value = _context.Evaluate(in expression);
+
+            if (value is not string queue)
+            {
+                throw new InvalidOperationException("QueueName must be a string.");
+            }
+
+            return queue;
         }
         private int GetHeartbeat()
         {

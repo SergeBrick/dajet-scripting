@@ -211,9 +211,7 @@ namespace DaJet.Scripting
 
             else if (node is ProduceStatement produce) { return Execute(in produce); }
 
-            return ExitCode.Success;
-
-            // throw new NotImplementedException($"Statement is not implemented: {node.GetType()}");
+            throw new NotImplementedException($"Statement is not implemented: {node.GetType()}");
         }
         private ExitCode Execute(in StatementBlock statements)
         {

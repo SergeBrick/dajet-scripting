@@ -179,10 +179,21 @@ namespace DaJet.RabbitMQ
             {
                 object value = _context.Evaluate(in expression);
 
-                if (value is int seconds)
+                if (value is null)
                 {
-                    return TimeSpan.FromSeconds(seconds);
+                    throw new InvalidOperationException("Null value is not allowed for the \"PublisherConfirmsTimeout\" option.");
                 }
+
+                if (value is int integer)
+                {
+                    return TimeSpan.FromSeconds(integer);
+                }
+                else if (value is decimal numeric)
+                {
+                    return TimeSpan.FromSeconds(decimal.ToInt32(numeric));
+                }
+                
+                throw new InvalidOperationException("\"PublisherConfirmsTimeout\" option must be an integer or a decimal value.");
             }
 
             return TimeSpan.FromSeconds(10);
@@ -193,10 +204,21 @@ namespace DaJet.RabbitMQ
             {
                 object value = _context.Evaluate(in expression);
 
-                if (value is int seconds)
+                if (value is null)
                 {
-                    return TimeSpan.FromSeconds(seconds);
+                    throw new InvalidOperationException("Null value is not allowed for the \"RequestedHeartbeat\" option.");
                 }
+
+                if (value is int integer)
+                {
+                    return TimeSpan.FromSeconds(integer);
+                }
+                else if (value is decimal numeric)
+                {
+                    return TimeSpan.FromSeconds(decimal.ToInt32(numeric));
+                }
+                
+                throw new InvalidOperationException("\"RequestedHeartbeat\" option must be an integer or a decimal value.");
             }
 
             return TimeSpan.FromSeconds(60);
@@ -207,10 +229,17 @@ namespace DaJet.RabbitMQ
             {
                 object value = _context.Evaluate(in expression);
 
+                if (value is null)
+                {
+                    throw new InvalidOperationException("Null value is not allowed for the \"AutomaticRecoveryEnabled\" option.");
+                }
+
                 if (value is bool boolean)
                 {
                     return boolean;
                 }
+                
+                throw new InvalidOperationException("\"AutomaticRecoveryEnabled\" option must be a boolean.");
             }
 
             return true;
@@ -221,10 +250,21 @@ namespace DaJet.RabbitMQ
             {
                 object value = _context.Evaluate(in expression);
 
-                if (value is int seconds)
+                if (value is null)
                 {
-                    return TimeSpan.FromSeconds(seconds);
+                    throw new InvalidOperationException("Null value is not allowed for the \"NetworkRecoveryInterval\" option.");
                 }
+
+                if (value is int integer)
+                {
+                    return TimeSpan.FromSeconds(integer);
+                }
+                else if (value is decimal numeric)
+                {
+                    return TimeSpan.FromSeconds(decimal.ToInt32(numeric));
+                }
+
+                throw new InvalidOperationException("\"NetworkRecoveryInterval\" option must be an integer or a decimal value.");
             }
 
             return TimeSpan.FromSeconds(5);
@@ -235,10 +275,21 @@ namespace DaJet.RabbitMQ
             {
                 object value = _context.Evaluate(in expression);
 
-                if (value is int seconds)
+                if (value is null)
                 {
-                    return TimeSpan.FromSeconds(seconds);
+                    throw new InvalidOperationException("Null value is not allowed for the \"ContinuationTimeout\" option.");
                 }
+
+                if (value is int integer)
+                {
+                    return TimeSpan.FromSeconds(integer);
+                }
+                else if (value is decimal numeric)
+                {
+                    return TimeSpan.FromSeconds(decimal.ToInt32(numeric));
+                }
+
+                throw new InvalidOperationException("\"ContinuationTimeout\" option must be an integer or a decimal value.");
             }
 
             return TimeSpan.FromSeconds(30);
@@ -249,10 +300,21 @@ namespace DaJet.RabbitMQ
             {
                 object value = _context.Evaluate(in expression);
 
-                if (value is int seconds)
+                if (value is null)
                 {
-                    return TimeSpan.FromSeconds(seconds);
+                    throw new InvalidOperationException("Null value is not allowed for the \"RequestedConnectionTimeout\" option.");
                 }
+
+                if (value is int integer)
+                {
+                    return TimeSpan.FromSeconds(integer);
+                }
+                else if (value is decimal numeric)
+                {
+                    return TimeSpan.FromSeconds(decimal.ToInt32(numeric));
+                }
+
+                throw new InvalidOperationException("\"RequestedConnectionTimeout\" option must be an integer or a decimal value.");
             }
 
             return TimeSpan.FromSeconds(30);
@@ -270,10 +332,17 @@ namespace DaJet.RabbitMQ
             {
                 object value = _context.Evaluate(in expression);
 
+                if (value is null)
+                {
+                    throw new InvalidOperationException("Null value is not allowed for the \"Mandatory\" property.");
+                }
+
                 if (value is bool boolean)
                 {
                     return boolean;
                 }
+
+                throw new InvalidOperationException("\"Mandatory\" property must be a boolean.");
             }
 
             return false;
@@ -284,10 +353,17 @@ namespace DaJet.RabbitMQ
             {
                 object value = _context.Evaluate(in expression);
 
-                if (value is string text)
+                if (value is not string text)
                 {
-                    return text;
+                    throw new InvalidOperationException("\"Exchange\" property must be a string.");
                 }
+
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    return string.Empty;
+                }
+
+                return text;
             }
 
             return string.Empty;
@@ -298,10 +374,17 @@ namespace DaJet.RabbitMQ
             {
                 object value = _context.Evaluate(in expression);
 
-                if (value is string text)
+                if (value is not string text)
                 {
-                    return text;
+                    throw new InvalidOperationException("\"RoutingKey\" property must be a string.");
                 }
+
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    return string.Empty;
+                }
+
+                return text;
             }
 
             return string.Empty;
@@ -312,10 +395,17 @@ namespace DaJet.RabbitMQ
             {
                 object value = _context.Evaluate(in expression);
 
-                if (value is string text)
+                if (value is not string text)
                 {
-                    return text;
+                    throw new InvalidOperationException("\"Body\" property must be a string.");
                 }
+
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    return string.Empty;
+                }
+
+                return text;
             }
 
             return string.Empty;
@@ -326,10 +416,12 @@ namespace DaJet.RabbitMQ
             {
                 object value = _context.Evaluate(in expression);
 
-                if (value is DataObject headers)
+                if (value is not DataObject headers)
                 {
-                    return headers;
+                    throw new InvalidOperationException("\"Headers\" property must be an object.");
                 }
+
+                return headers;
             }
 
             return null;
@@ -390,10 +482,17 @@ namespace DaJet.RabbitMQ
             {
                 object value = _context.Evaluate(in expression);
 
-                if (value is string text)
+                if (value is not string text)
                 {
-                    return text;
+                    throw new InvalidOperationException("\"AppId\" property must be a string.");
                 }
+
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    return string.Empty;
+                }
+
+                return text;
             }
 
             return null;
@@ -404,10 +503,22 @@ namespace DaJet.RabbitMQ
             {
                 object value = _context.Evaluate(in expression);
 
+                if (value is null)
+                {
+                    throw new InvalidOperationException("Null value is not allowed for the \"MessageId\" property.");
+                }
+                
                 if (value is string text)
                 {
+                    if (string.IsNullOrWhiteSpace(text))
+                    {
+                        throw new InvalidOperationException("Empty string value is not allowed for the \"MessageId\" property.");
+                    }
+
                     return text;
                 }
+
+                return value.ToString();
             }
 
             return null;
@@ -418,10 +529,17 @@ namespace DaJet.RabbitMQ
             {
                 object value = _context.Evaluate(in expression);
 
-                if (value is string text)
+                if (value is not string text)
                 {
-                    return text;
+                    throw new InvalidOperationException("\"Type\" property must be a string.");
                 }
+
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    return string.Empty;
+                }
+
+                return text;
             }
 
             return null;
@@ -432,10 +550,22 @@ namespace DaJet.RabbitMQ
             {
                 object value = _context.Evaluate(in expression);
 
+                if (value is null)
+                {
+                    throw new InvalidOperationException("Null value is not allowed for the \"CorrelationId\" property.");
+                }
+
                 if (value is string text)
                 {
+                    if (string.IsNullOrWhiteSpace(text))
+                    {
+                        throw new InvalidOperationException("Empty string value is not allowed for the \"CorrelationId\" property.");
+                    }
+
                     return text;
                 }
+
+                return value.ToString();
             }
 
             return null;
@@ -446,10 +576,27 @@ namespace DaJet.RabbitMQ
             {
                 object value = _context.Evaluate(in expression);
 
+                if (value is null)
+                {
+                    throw new InvalidOperationException("Null value is not allowed for the \"Priority\" property.");
+                }
+
                 if (value is byte priority)
                 {
                     return priority;
                 }
+
+                if (value is int integer)
+                {
+                    return (byte)integer;
+                }
+
+                if (value is decimal numeric)
+                {
+                    return decimal.ToByte(numeric);
+                }
+
+                throw new InvalidOperationException("\"Priority\" property must be an integer or a decimal value.");
             }
 
             return (byte)0;
@@ -460,10 +607,17 @@ namespace DaJet.RabbitMQ
             {
                 object value = _context.Evaluate(in expression);
 
-                if (value is string text)
+                if (value is not string text)
                 {
-                    return text;
+                    throw new InvalidOperationException("\"ContentType\" property must be a string.");
                 }
+
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    return string.Empty;
+                }
+
+                return text;
             }
 
             return "application/json";
@@ -474,10 +628,17 @@ namespace DaJet.RabbitMQ
             {
                 object value = _context.Evaluate(in expression);
 
-                if (value is string text)
+                if (value is not string text)
                 {
-                    return text;
+                    throw new InvalidOperationException("\"ContentEncoding\" property must be a string.");
                 }
+
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    return string.Empty;
+                }
+
+                return text;
             }
 
             return "UTF-8";
@@ -488,10 +649,17 @@ namespace DaJet.RabbitMQ
             {
                 object value = _context.Evaluate(in expression);
 
-                if (value is string text)
+                if (value is not string text)
                 {
-                    return text;
+                    throw new InvalidOperationException("\"ReplyTo\" property must be a string.");
                 }
+
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    return string.Empty;
+                }
+
+                return text;
             }
 
             return null;
@@ -502,10 +670,17 @@ namespace DaJet.RabbitMQ
             {
                 object value = _context.Evaluate(in expression);
 
-                if (value is string text)
+                if (value is not string text)
                 {
-                    return text;
+                    throw new InvalidOperationException("\"Expiration\" property must be a string.");
                 }
+
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    return string.Empty;
+                }
+
+                return text;
             }
 
             return null;
@@ -516,10 +691,39 @@ namespace DaJet.RabbitMQ
             {
                 object value = _context.Evaluate(in expression);
 
+                if (value is null)
+                {
+                    throw new InvalidOperationException("Null value is not allowed for the \"DeliveryMode\" property.");
+                }
+
+                if (value is string text)
+                {
+                    if (text == "transient")
+                    {
+                        return DeliveryModes.Transient;
+                    }
+                    else if (text == "persistent")
+                    {
+                        return DeliveryModes.Persistent;
+                    }
+                }
+
                 if (value is byte mode)
                 {
                     return mode == 1 ? DeliveryModes.Transient : DeliveryModes.Persistent;
                 }
+
+                if (value is int integer)
+                {
+                    return integer == 1 ? DeliveryModes.Transient : DeliveryModes.Persistent;
+                }
+
+                if (value is decimal numeric)
+                {
+                    return numeric == 1 ? DeliveryModes.Transient : DeliveryModes.Persistent;
+                }
+                
+                throw new InvalidOperationException("\"DeliveryMode\" property has invalid value.");
             }
 
             return DeliveryModes.Persistent;
@@ -945,11 +1149,6 @@ namespace DaJet.RabbitMQ
             //{
             //    ResetState();
             //}
-        }
-        
-        private static void LogDebug(string message)
-        {
-            FileLogger.Default.Write($"[RabbitMQ.Producer] {message}");
         }
     }
 }

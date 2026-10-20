@@ -23,6 +23,7 @@ WHILE @counter > 0
             , client.id          = 'dajet'
             , bootstrap.servers  = '192.168.61.221:9092'
             , max.in.flight      = 1
+            , retries            = 1
             , message.timeout.ms = 30000
             , enable.idempotence = false
        SELECT Topic = 'test-topic'
