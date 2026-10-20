@@ -188,6 +188,7 @@ namespace DaJet.Scripting
         private ExitCode Execute(in SyntaxNode node)
         {
             if (node is DeclareStatement declare) { return Execute(in declare); }
+            else if (node is CommentStatement) { return ExitCode.Success; }
             else if (node is PrintStatement print) { return Execute(in print); }
             else if (node is SleepStatement sleep) { return Execute(in sleep); }
 
